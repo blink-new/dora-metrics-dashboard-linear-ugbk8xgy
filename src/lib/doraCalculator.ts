@@ -21,6 +21,11 @@ export interface DORAMetrics {
     unit: string;
     trend: number;
     rating: 'Elite' | 'High' | 'Medium' | 'Low';
+    details?: {
+      totalDeployments: number;
+      failedDeployments: number;
+      failureDescription: string;
+    };
   };
   timeToRecovery: {
     value: number;
@@ -184,34 +189,52 @@ class DORACalculator {
    * Each day with completed issues represents a deployment cycle
    */
   private getDeploymentCycles(issues: LinearIssue[]): DeploymentCycle[] {
+    if (!issues || !Array.isArray(issues)) {
+      return [];
+    }
+
     const cycleMap = new Map<string, LinearIssue[]>();
     
     // Group issues by completion date (day)
     issues.forEach(issue => {
-      if (issue.completedAt) {
-        const date = issue.completedAt.split('T')[0]; // Get YYYY-MM-DD
-        if (!cycleMap.has(date)) {
-          cycleMap.set(date, []);
+      if (issue && issue.completedAt && typeof issue.completedAt === 'string') {
+        try {
+          const date = issue.completedAt.split('T')[0]; // Get YYYY-MM-DD
+          if (date && date.length === 10) { // Basic validation for YYYY-MM-DD format
+            if (!cycleMap.has(date)) {
+              cycleMap.set(date, []);
+            }
+            cycleMap.get(date)!.push(issue);
+          }
+        } catch (error) {
+          console.warn('Error processing issue completion date:', issue.completedAt, error);
         }
-        cycleMap.get(date)!.push(issue);
       }
     });
 
     // Convert to deployment cycles
     return Array.from(cycleMap.entries()).map(([date, cycleIssues]) => {
       // A cycle is considered failed if it contains any bugs, hotfixes, or incidents
-      const isFailedDeployment = cycleIssues.some(issue =>
-        issue.labels.nodes.some(label => 
-          label.name.toLowerCase().includes('bug') ||
-          label.name.toLowerCase().includes('hotfix') ||
-          label.name.toLowerCase().includes('incident') ||
-          label.name.toLowerCase().includes('revert')
-        )
-      );
+      let isFailedDeployment = false;
+      try {
+        isFailedDeployment = cycleIssues.some(issue =>
+          issue && issue.labels && issue.labels.nodes && Array.isArray(issue.labels.nodes) &&
+          issue.labels.nodes.some(label => 
+            label && label.name && typeof label.name === 'string' &&
+            (label.name.toLowerCase().includes('bug') ||
+             label.name.toLowerCase().includes('hotfix') ||
+             label.name.toLowerCase().includes('incident') ||
+             label.name.toLowerCase().includes('revert'))
+          )
+        );
+      } catch (error) {
+        console.warn('Error checking for failed deployment labels:', error);
+        isFailedDeployment = false;
+      }
 
       return {
         date,
-        issues: cycleIssues,
+        issues: cycleIssues || [],
         isFailedDeployment
       };
     }).sort((a, b) => a.date.localeCompare(b.date));
@@ -222,10 +245,17 @@ class DORACalculator {
    * Recovery time = from when incident tag was applied to when deployed (completedAt)
    */
   private getIncidentRecoveryTimes(issues: LinearIssue[]): number[] {
+    if (!issues || !Array.isArray(issues)) {
+      return [];
+    }
+
     const incidentIssues = issues.filter(issue => 
+      issue && 
       issue.completedAt &&
-      issue.state.type === 'completed' &&
+      issue.state && issue.state.type === 'completed' &&
+      issue.labels && issue.labels.nodes && Array.isArray(issue.labels.nodes) &&
       issue.labels.nodes.some(label => 
+        label && label.name && typeof label.name === 'string' &&
         label.name.toLowerCase().includes('incident')
       )
     );
@@ -233,29 +263,52 @@ class DORACalculator {
     return incidentIssues.map(issue => {
       if (!issue.completedAt || !issue.createdAt) return 0;
       
-      // For now, we'll use createdAt as proxy for when incident tag was applied
-      // In a real implementation, you'd want to track when the incident label was actually added
-      const incidentStart = new Date(issue.createdAt);
-      const resolved = new Date(issue.completedAt);
-      
-      // Use business hours calculation (excludes weekends)
-      return calculateBusinessHours(incidentStart, resolved);
+      try {
+        // For now, we'll use createdAt as proxy for when incident tag was applied
+        // In a real implementation, you'd want to track when the incident label was actually added
+        const incidentStart = new Date(issue.createdAt);
+        const resolved = new Date(issue.completedAt);
+        
+        // Use business hours calculation (excludes weekends)
+        return calculateBusinessHours(incidentStart, resolved);
+      } catch (error) {
+        console.warn('Error calculating recovery time for issue:', issue.identifier, error);
+        return 0;
+      }
     }).filter(time => time > 0);
   }
 
   calculateDORAMetrics(): DORAMetrics {
-    const completedIssues = this.getCompletedIssues();
-    const recentIssues = this.getIssuesInPeriod(30); // Last 30 days
-    const previousPeriodIssues = this.getIssuesInPeriod(60).filter(issue => {
-      const completedDate = new Date(issue.completedAt!);
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-      return completedDate >= sixtyDaysAgo && completedDate < thirtyDaysAgo;
-    });
+    try {
+      const completedIssues = this.getCompletedIssues();
+      const recentIssues = this.getIssuesInPeriod(30); // Last 30 days
+      const previousPeriodIssues = this.getIssuesInPeriod(60).filter(issue => {
+        if (!issue || !issue.completedAt) return false;
+        try {
+          const completedDate = new Date(issue.completedAt);
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+          return completedDate >= sixtyDaysAgo && completedDate < thirtyDaysAgo;
+        } catch (error) {
+          console.warn('Error filtering previous period issues:', error);
+          return false;
+        }
+      });
 
-    // Get deployment cycles for both recent and previous periods (needed for multiple calculations)
-    const recentCycles = this.getDeploymentCycles(recentIssues);
-    const previousCycles = this.getDeploymentCycles(previousPeriodIssues);
+      // Get deployment cycles for both recent and previous periods (needed for multiple calculations)
+      // Ensure these variables are properly declared and accessible throughout the method
+      let recentCycles: DeploymentCycle[] = [];
+      let previousCycles: DeploymentCycle[] = [];
+      
+      try {
+        recentCycles = this.getDeploymentCycles(recentIssues);
+        previousCycles = this.getDeploymentCycles(previousPeriodIssues);
+      } catch (error) {
+        console.error('Error calculating deployment cycles:', error);
+        // Fallback to empty arrays if there's an error
+        recentCycles = [];
+        previousCycles = [];
+      }
 
     // 1. Deployment Frequency - Count tasks that reached "Deployed" state within the selected cycle
     let deploymentFrequency = 0;
@@ -285,8 +338,8 @@ class DORACalculator {
     
     // Calculate trend (compare with previous period)
     const previousDeploymentFreq = this.selectedCycle ? 
-      previousCycles.reduce((sum, cycle) => sum + cycle.issues.length, 0) : 
-      previousCycles.length / 30;
+      (previousCycles && previousCycles.length > 0 ? previousCycles.reduce((sum, cycle) => sum + cycle.issues.length, 0) : 0) : 
+      (previousCycles && previousCycles.length > 0 ? previousCycles.length / 30 : 0);
     const deploymentTrend = previousDeploymentFreq > 0 
       ? Math.round(((deploymentFrequency - previousDeploymentFreq) / previousDeploymentFreq) * 100)
       : 0;
@@ -320,15 +373,38 @@ class DORACalculator {
       ? Math.round(((averageLeadTimeHours - previousAvgLeadTime) / previousAvgLeadTime) * 100)
       : 0;
 
-    // 3. Change Failure Rate - Percentage of deployment cycles that failed
-    const failedCycles = recentCycles.filter(cycle => cycle.isFailedDeployment);
-    const changeFailureRate = recentCycles.length > 0 
-      ? (failedCycles.length / recentCycles.length) * 100 
+    // 3. Change Failure Rate - Percentage of deployed tasks that resulted in failures
+    // Base Set: All tasks that reached "Deployed" status
+    const deployedTasks = recentIssues.filter(issue => 
+      issue.state.name.toLowerCase().includes('deployed') ||
+      issue.state.type === 'completed' // Also consider completed as deployed
+    );
+
+    // Failure Identification: Tasks with "Incident" or "Rollback" tags
+    const failedDeployments = deployedTasks.filter(issue =>
+      issue.labels.nodes.some(label => 
+        label.name.toLowerCase().includes('incident') ||
+        label.name.toLowerCase().includes('rollback')
+      )
+    );
+
+    const changeFailureRate = deployedTasks.length > 0 
+      ? (failedDeployments.length / deployedTasks.length) * 100 
       : 0;
 
-    const previousFailedCycles = previousCycles.filter(cycle => cycle.isFailedDeployment);
-    const previousFailureRate = previousCycles.length > 0 
-      ? (previousFailedCycles.length / previousCycles.length) * 100 
+    // Calculate previous period for trend
+    const previousDeployedTasks = previousPeriodIssues.filter(issue => 
+      issue.state.name.toLowerCase().includes('deployed') ||
+      issue.state.type === 'completed'
+    );
+    const previousFailedDeployments = previousDeployedTasks.filter(issue =>
+      issue.labels.nodes.some(label => 
+        label.name.toLowerCase().includes('incident') ||
+        label.name.toLowerCase().includes('rollback')
+      )
+    );
+    const previousFailureRate = previousDeployedTasks.length > 0 
+      ? (previousFailedDeployments.length / previousDeployedTasks.length) * 100 
       : 0;
     const failureRateTrend = previousFailureRate > 0 
       ? Math.round(((changeFailureRate - previousFailureRate) / previousFailureRate) * 100)
@@ -349,35 +425,79 @@ class DORACalculator {
       ? Math.round(((averageRecoveryTimeHours - previousAvgRecovery) / previousAvgRecovery) * 100)
       : 0;
 
-    return {
-      deploymentFrequency: {
-        value: this.selectedCycle ? deploymentFrequency : Math.round(deploymentFrequency * 10) / 10,
-        unit: deploymentUnit,
-        displayText: deploymentDisplayText || undefined,
-        trend: deploymentTrend,
-        rating: this.getRating(deploymentFrequency, [1, 0.2, 0.1]) // Elite: >1/day, High: >1/5days, Medium: >1/10days
-      },
-      leadTimeForChanges: {
-        value: averageLeadTimeDays,
-        unit: 'business days',
-        formattedValue: formatBusinessDuration(averageLeadTimeHours),
-        trend: -leadTimeTrend, // Negative because lower is better
-        rating: this.getRating(averageLeadTimeDays, [1, 7, 30], true) // Elite: <1day, High: <1week, Medium: <1month
-      },
-      changeFailureRate: {
-        value: Math.round(changeFailureRate * 10) / 10,
-        unit: '%',
-        trend: -failureRateTrend, // Negative because lower is better
-        rating: this.getRating(changeFailureRate, [15, 30, 45], true) // Elite: <15%, High: <30%, Medium: <45%
-      },
-      timeToRecovery: {
-        value: averageRecoveryTimeDays,
-        unit: 'business days',
-        formattedValue: formatBusinessDuration(averageRecoveryTimeHours),
-        trend: -recoveryTrend, // Negative because lower is better
-        rating: this.getRating(averageRecoveryTimeDays, [0.04, 1, 7], true) // Elite: <1hour, High: <1day, Medium: <1week
-      }
-    };
+      return {
+        deploymentFrequency: {
+          value: this.selectedCycle ? deploymentFrequency : Math.round(deploymentFrequency * 10) / 10,
+          unit: deploymentUnit,
+          displayText: deploymentDisplayText || undefined,
+          trend: deploymentTrend,
+          rating: this.getRating(deploymentFrequency, [1, 0.2, 0.1]) // Elite: >1/day, High: >1/5days, Medium: >1/10days
+        },
+        leadTimeForChanges: {
+          value: averageLeadTimeDays,
+          unit: 'business days',
+          formattedValue: formatBusinessDuration(averageLeadTimeHours),
+          trend: -leadTimeTrend, // Negative because lower is better
+          rating: this.getRating(averageLeadTimeDays, [1, 7, 30], true) // Elite: <1day, High: <1week, Medium: <1month
+        },
+        changeFailureRate: {
+          value: Math.round(changeFailureRate * 10) / 10,
+          unit: '%',
+          trend: -failureRateTrend, // Negative because lower is better
+          rating: this.getRating(changeFailureRate, [15, 30, 45], true), // Elite: <15%, High: <30%, Medium: <45%
+          details: {
+            totalDeployments: deployedTasks.length,
+            failedDeployments: failedDeployments.length,
+            failureDescription: deployedTasks.length === 0 
+              ? 'No deployments found in the selected period'
+              : `${failedDeployments.length} out of ${deployedTasks.length} deployments marked as failures (tags: Incident/Rollback)`
+          }
+        },
+        timeToRecovery: {
+          value: averageRecoveryTimeDays,
+          unit: 'business days',
+          formattedValue: formatBusinessDuration(averageRecoveryTimeHours),
+          trend: -recoveryTrend, // Negative because lower is better
+          rating: this.getRating(averageRecoveryTimeDays, [0.04, 1, 7], true) // Elite: <1hour, High: <1day, Medium: <1week
+        }
+      };
+    } catch (error) {
+      console.error('Error calculating DORA metrics:', error);
+      // Return default metrics in case of error
+      return {
+        deploymentFrequency: {
+          value: 0,
+          unit: 'deployments',
+          trend: 0,
+          rating: 'Low'
+        },
+        leadTimeForChanges: {
+          value: 0,
+          unit: 'business days',
+          formattedValue: '0 hours',
+          trend: 0,
+          rating: 'Low'
+        },
+        changeFailureRate: {
+          value: 0,
+          unit: '%',
+          trend: 0,
+          rating: 'Elite',
+          details: {
+            totalDeployments: 0,
+            failedDeployments: 0,
+            failureDescription: 'Error calculating metrics'
+          }
+        },
+        timeToRecovery: {
+          value: 0,
+          unit: 'business days',
+          formattedValue: '0 hours',
+          trend: 0,
+          rating: 'Low'
+        }
+      };
+    }
   }
 
   calculateLeadTimeAnalysis(): LeadTimeAnalysis {

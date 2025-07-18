@@ -11,9 +11,14 @@ interface MetricCardProps {
   trend: number;
   rating: 'Elite' | 'High' | 'Medium' | 'Low';
   description?: string;
+  details?: {
+    totalDeployments?: number;
+    failedDeployments?: number;
+    failureDescription?: string;
+  };
 }
 
-const MetricCard = ({ title, value, unit, formattedValue, displayText, trend, rating, description }: MetricCardProps) => {
+const MetricCard = ({ title, value, unit, formattedValue, displayText, trend, rating, description, details }: MetricCardProps) => {
   const getRatingColor = (rating: string) => {
     switch (rating) {
       case 'Elite':
@@ -69,6 +74,11 @@ const MetricCard = ({ title, value, unit, formattedValue, displayText, trend, ra
         {description && (
           <p className="text-xs text-gray-500 mt-2">
             {description}
+          </p>
+        )}
+        {details?.failureDescription && (
+          <p className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded border">
+            {details.failureDescription}
           </p>
         )}
       </CardContent>

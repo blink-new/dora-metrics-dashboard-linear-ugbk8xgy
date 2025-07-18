@@ -519,7 +519,8 @@ const DORADashboard = () => {
                   unit={doraMetrics.changeFailureRate.unit}
                   trend={doraMetrics.changeFailureRate.trend}
                   rating={doraMetrics.changeFailureRate.rating}
-                  description="Percentage of deployments causing a failure in production"
+                  description="Percentage of deployed tasks that resulted in failures"
+                  details={doraMetrics.changeFailureRate.details}
                 />
                 <MetricCard
                   title="Time to Recovery"
