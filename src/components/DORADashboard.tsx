@@ -18,6 +18,7 @@ import CodeReviewAnalysis from './CodeReviewAnalysis';
 import CycleDataExplorer from './CycleDataExplorer';
 import ReadmePage from './ReadmePage';
 import TrendAnalysis from './TrendAnalysis';
+import MetricRelationshipAnalysis from './MetricRelationshipAnalysis';
 
 import LinearApiClient, { LinearIssue, LinearCycle, generateStatusHistory } from '@/lib/linearApi';
 import DORACalculator, { DORAMetrics, LeadTimeAnalysis as LeadTimeAnalysisType, EstimationAnalysis as EstimationAnalysisType, CodeReviewAnalysis as CodeReviewAnalysisType } from '@/lib/doraCalculator';
@@ -1083,11 +1084,12 @@ const DORADashboard = () => {
         {/* Main Content */}
         {isConnected && doraMetrics && (
           <Tabs defaultValue="overview" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-7">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="leadtime">Cycle Time</TabsTrigger>
               <TabsTrigger value="estimation">Estimation</TabsTrigger>
               <TabsTrigger value="codereview">Code Review</TabsTrigger>
+              <TabsTrigger value="analysis">Metric Analysis</TabsTrigger>
               <TabsTrigger value="trends">Trends</TabsTrigger>
               <TabsTrigger value="explorer">Data Explorer</TabsTrigger>
             </TabsList>
@@ -1208,6 +1210,15 @@ const DORADashboard = () => {
 
             <TabsContent value="codereview">
               {codeReviewAnalysis && <CodeReviewAnalysis data={codeReviewAnalysis} />}
+            </TabsContent>
+
+            <TabsContent value="analysis">
+              {doraMetrics && codeReviewAnalysis && (
+                <MetricRelationshipAnalysis 
+                  doraMetrics={doraMetrics} 
+                  codeReviewAnalysis={codeReviewAnalysis} 
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="trends">
