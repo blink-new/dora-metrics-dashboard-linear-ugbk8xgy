@@ -344,246 +344,7 @@ class LinearApiClient {
   }
 
   async getIssues(teamId?: string, cycleId?: string, days: number = 30): Promise<LinearIssue[]> {
-    // Build the query based on filters - simplified without date filtering
-    let query: string;
-    let variables: any = {};
-
-    if (teamId && teamId !== 'all' && cycleId && cycleId !== 'all') {
-      // Both team and cycle specified
-      query = `
-        query($teamId: ID!, $cycleId: ID!) {
-          issues(
-            filter: {
-              team: { id: { eq: $teamId } }
-              cycle: { id: { eq: $cycleId } }
-            }
-            first: 200
-          ) {
-            nodes {
-              id
-              identifier
-              title
-              description
-              estimate
-              priority
-              state {
-                id
-                name
-                type
-              }
-              team {
-                id
-                name
-              }
-              assignee {
-                id
-                name
-                email
-              }
-              createdAt
-              updatedAt
-              completedAt
-              startedAt
-              cycle {
-                id
-                name
-                number
-                startsAt
-                endsAt
-              }
-              labels {
-                nodes {
-                  id
-                  name
-                  color
-                }
-              }
-            }
-          }
-        }
-      `;
-      variables = { teamId, cycleId };
-    } else if (teamId && teamId !== 'all') {
-      // Only team specified
-      query = `
-        query($teamId: ID!) {
-          issues(
-            filter: {
-              team: { id: { eq: $teamId } }
-            }
-            first: 200
-          ) {
-            nodes {
-              id
-              identifier
-              title
-              description
-              estimate
-              priority
-              state {
-                id
-                name
-                type
-              }
-              team {
-                id
-                name
-              }
-              assignee {
-                id
-                name
-                email
-              }
-              createdAt
-              updatedAt
-              completedAt
-              startedAt
-              cycle {
-                id
-                name
-                number
-                startsAt
-                endsAt
-              }
-              labels {
-                nodes {
-                  id
-                  name
-                  color
-                }
-              }
-            }
-          }
-        }
-      `;
-      variables = { teamId };
-    } else if (cycleId && cycleId !== 'all') {
-      // Only cycle specified
-      query = `
-        query($cycleId: ID!) {
-          issues(
-            filter: {
-              cycle: { id: { eq: $cycleId } }
-            }
-            first: 200
-          ) {
-            nodes {
-              id
-              identifier
-              title
-              description
-              estimate
-              priority
-              state {
-                id
-                name
-                type
-              }
-              team {
-                id
-                name
-              }
-              assignee {
-                id
-                name
-                email
-              }
-              createdAt
-              updatedAt
-              completedAt
-              startedAt
-              cycle {
-                id
-                name
-                number
-                startsAt
-                endsAt
-              }
-              labels {
-                nodes {
-                  id
-                  name
-                  color
-                }
-              }
-            }
-          }
-        }
-      `;
-      variables = { cycleId };
-    } else {
-      // No specific filters - get recent issues
-      query = `
-        query {
-          issues(
-            first: 200
-          ) {
-            nodes {
-              id
-              identifier
-              title
-              description
-              estimate
-              priority
-              state {
-                id
-                name
-                type
-              }
-              team {
-                id
-                name
-              }
-              assignee {
-                id
-                name
-                email
-              }
-              createdAt
-              updatedAt
-              completedAt
-              startedAt
-              cycle {
-                id
-                name
-                number
-                startsAt
-                endsAt
-              }
-              labels {
-                nodes {
-                  id
-                  name
-                  color
-                }
-              }
-            }
-          }
-        }
-      `;
-    }
-
-    const data = await this.makeRequest(query, variables);
-    const issues = data.issues.nodes || [];
-    
-    // Filter by date on the client side
-    let filteredIssues = issues;
-    if (days && days > 0) {
-      const dateFilter = new Date();
-      dateFilter.setDate(dateFilter.getDate() - days);
-      
-      filteredIssues = issues.filter((issue: LinearIssue) => {
-        const updatedAt = new Date(issue.updatedAt);
-        return updatedAt >= dateFilter;
-      });
-    }
-    
-    // Generate status history for all issues
-    return filteredIssues.map((issue: LinearIssue) => generateStatusHistory(issue));
-  }
-
-  async getIssuesWithHistory(teamId?: string, cycleId?: string, days: number = 30): Promise<LinearIssue[]> {
-    // Build the query based on filters - using available fields for tracking changes
+    // Build the query based on filters - NOW INCLUDING ACTUAL HISTORY
     let query: string;
     let variables: any = {};
 
@@ -624,6 +385,24 @@ class LinearApiClient {
           id
           name
           color
+        }
+      }
+      history {
+        nodes {
+          id
+          createdAt
+          fromState {
+            id
+            name
+          }
+          toState {
+            id
+            name
+          }
+          actor {
+            id
+            name
+          }
         }
       }
     `;
@@ -710,8 +489,214 @@ class LinearApiClient {
       });
     }
     
-    // Generate status history for all issues
-    return filteredIssues.map((issue: LinearIssue) => generateStatusHistory(issue));
+    // Convert actual Linear history to our status history format
+    return filteredIssues.map((issue: any) => this.convertLinearHistoryToStatusHistory(issue));
+  }
+
+  async getIssuesWithHistory(teamId?: string, cycleId?: string, days: number = 30): Promise<LinearIssue[]> {
+    // Build the query based on filters - using available fields for tracking changes
+    let query: string;
+    let variables: any = {};
+
+    const issueFields = `
+      id
+      identifier
+      title
+      description
+      estimate
+      priority
+      state {
+        id
+        name
+        type
+      }
+      team {
+        id
+        name
+      }
+      assignee {
+        id
+        name
+        email
+      }
+      createdAt
+      updatedAt
+      completedAt
+      startedAt
+      cycle {
+        id
+        name
+        number
+        startsAt
+        endsAt
+      }
+      labels {
+        nodes {
+          id
+          name
+          color
+        }
+      }
+      history {
+        nodes {
+          id
+          createdAt
+          fromState {
+            id
+            name
+          }
+          toState {
+            id
+            name
+          }
+          actor {
+            id
+            name
+          }
+        }
+      }
+    `;
+
+    if (teamId && teamId !== 'all' && cycleId && cycleId !== 'all') {
+      // Both team and cycle specified
+      query = `
+        query($teamId: ID!, $cycleId: ID!) {
+          issues(
+            filter: {
+              team: { id: { eq: $teamId } }
+              cycle: { id: { eq: $cycleId } }
+            }
+            first: 200
+          ) {
+            nodes {
+              ${issueFields}
+            }
+          }
+        }
+      `;
+      variables = { teamId, cycleId };
+    } else if (teamId && teamId !== 'all') {
+      // Only team specified
+      query = `
+        query($teamId: ID!) {
+          issues(
+            filter: {
+              team: { id: { eq: $teamId } }
+            }
+            first: 200
+          ) {
+            nodes {
+              ${issueFields}
+            }
+          }
+        }
+      `;
+      variables = { teamId };
+    } else if (cycleId && cycleId !== 'all') {
+      // Only cycle specified
+      query = `
+        query($cycleId: ID!) {
+          issues(
+            filter: {
+              cycle: { id: { eq: $cycleId } }
+            }
+            first: 200
+          ) {
+            nodes {
+              ${issueFields}
+            }
+          }
+        }
+      `;
+      variables = { cycleId };
+    } else {
+      // No specific filters - get recent issues
+      query = `
+        query {
+          issues(
+            first: 200
+          ) {
+            nodes {
+              ${issueFields}
+            }
+          }
+        }
+      `;
+    }
+
+    const data = await this.makeRequest(query, variables);
+    const issues = data.issues.nodes || [];
+    
+    // Filter by date on the client side
+    let filteredIssues = issues;
+    if (days && days > 0) {
+      const dateFilter = new Date();
+      dateFilter.setDate(dateFilter.getDate() - days);
+      
+      filteredIssues = issues.filter((issue: LinearIssue) => {
+        const updatedAt = new Date(issue.updatedAt);
+        return updatedAt >= dateFilter;
+      });
+    }
+    
+    // Convert actual Linear history to our status history format
+    return filteredIssues.map((issue: any) => this.convertLinearHistoryToStatusHistory(issue));
+  }
+
+  /**
+   * Convert actual Linear history to our status history format
+   */
+  private convertLinearHistoryToStatusHistory(issue: any): LinearIssue {
+    // Convert the actual Linear history to our status history format
+    const statusHistory = [];
+    
+    if (issue.history && issue.history.nodes && Array.isArray(issue.history.nodes)) {
+      // Sort history by creation date
+      const sortedHistory = issue.history.nodes
+        .filter((entry: any) => entry && entry.createdAt && entry.toState)
+        .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      
+      // Convert each history entry to our format
+      sortedHistory.forEach((entry: any, index: number) => {
+        statusHistory.push({
+          id: `${issue.id}-${index}`,
+          timestamp: entry.createdAt,
+          fromState: entry.fromState?.name || undefined,
+          toState: entry.toState?.name || 'Unknown',
+          duration: undefined, // We'll calculate this if needed
+          pullRequest: undefined // Linear doesn't provide PR info in history
+        });
+      });
+    }
+    
+    // If no history found, create a minimal history based on current state
+    if (statusHistory.length === 0) {
+      statusHistory.push({
+        id: `${issue.id}-0`,
+        timestamp: issue.createdAt,
+        fromState: undefined,
+        toState: 'Created',
+        duration: undefined,
+        pullRequest: undefined
+      });
+      
+      if (issue.state && issue.state.name !== 'Created') {
+        statusHistory.push({
+          id: `${issue.id}-1`,
+          timestamp: issue.updatedAt,
+          fromState: 'Created',
+          toState: issue.state.name,
+          duration: undefined,
+          pullRequest: undefined
+        });
+      }
+    }
+    
+    // Return the issue with the actual status history
+    return {
+      ...issue,
+      statusHistory
+    };
   }
 
   async testConnection(): Promise<boolean> {
