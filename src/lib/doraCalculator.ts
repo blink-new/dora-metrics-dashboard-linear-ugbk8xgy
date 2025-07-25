@@ -366,52 +366,46 @@ class DORACalculator {
     let mergedTime: string | null = null;
     let deployedTime: string | null = null;
     
-    // Debug: Log the status history for this issue
-    console.log(`🔍 Time to Deploy Debug for ${issue.identifier}:`);
-    console.log('Status History:', issue.statusHistory);
-    
-    // Look for the exact "Merged" to "Deployed" transition in status history
+    // Look for merge and deploy transitions in status history
     if (issue.statusHistory && Array.isArray(issue.statusHistory)) {
-      console.log(`  Found ${issue.statusHistory.length} status transitions:`);
+      // For your Linear workflow, we need to understand the actual flow:
+      // Based on the data, your workflow appears to be: In Progress → Ready → done
+      // Where "Ready" represents code that's ready for deployment (merged)
+      // And "done" represents deployed state
       
-      issue.statusHistory.forEach((entry, index) => {
-        console.log(`    ${index}: ${entry.fromState || 'START'} → ${entry.toState} at ${entry.timestamp}`);
-      });
-      
-      // Find the transition TO "Merged" state
-      const mergedTransition = issue.statusHistory.find(entry => {
+      // Find the transition TO "Ready" state (this represents merged/ready for deploy)
+      const readyTransition = issue.statusHistory.find(entry => {
         if (!entry || !entry.toState) return false;
         const state = entry.toState.toLowerCase().trim();
-        return state === 'merged';
+        return state === 'ready' || 
+               state === 'merged' || 
+               state === 'code review' ||
+               state === 'testing' ||
+               state === 'staging';
       });
       
-      // Find the transition TO "Deployed" state
+      // Find the transition TO final completion state (this represents deployed)
       const deployedTransition = issue.statusHistory.find(entry => {
         if (!entry || !entry.toState) return false;
         const state = entry.toState.toLowerCase().trim();
-        return state === 'deployed';
+        return state === 'done' || 
+               state === 'deployed' || 
+               state === 'completed' ||
+               state === 'closed' ||
+               state === 'finished';
       });
       
-      console.log(`  Merged transition found:`, mergedTransition);
-      console.log(`  Deployed transition found:`, deployedTransition);
-      
-      if (mergedTransition && mergedTransition.timestamp) {
-        mergedTime = mergedTransition.timestamp;
+      if (readyTransition && readyTransition.timestamp) {
+        mergedTime = readyTransition.timestamp;
       }
       
       if (deployedTransition && deployedTransition.timestamp) {
         deployedTime = deployedTransition.timestamp;
       }
-    } else {
-      console.log('  No status history found');
     }
     
-    console.log(`  Merged time: ${mergedTime}`);
-    console.log(`  Deployed time: ${deployedTime}`);
-    
-    // If we don't have both merged and deployed times, return 0
+    // If we don't have both times, return 0
     if (!mergedTime || !deployedTime) {
-      console.log(`  ❌ Missing timestamps - returning 0`);
       return 0;
     }
     
@@ -420,19 +414,16 @@ class DORACalculator {
     
     // Validate timestamps
     if (isNaN(merged.getTime()) || isNaN(deployed.getTime())) {
-      console.log(`  ❌ Invalid timestamps - returning 0`);
       return 0;
     }
     
     // Ensure deployment is after merge
     if (deployed <= merged) {
-      console.log(`  ❌ Deployment not after merge - returning 0`);
       return 0;
     }
     
     // Use business hours calculation (excludes weekends)
     const deployTime = calculateBusinessHours(merged, deployed);
-    console.log(`  ✅ Calculated deploy time: ${deployTime} hours`);
     
     return deployTime;
   }
