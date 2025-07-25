@@ -109,7 +109,7 @@ const CycleDataExplorer: React.FC<CycleDataExplorerProps> = ({
         timeToCompleteFormatted = formatBusinessDuration(timeToComplete);
       }
 
-      // Create realistic status history based on actual Linear issue data
+      // Use actual Linear status history if available
       const statusHistory: StatusTransition[] = [];
       
       const formatDateTime = (dateString: string) => {
@@ -148,7 +148,7 @@ const CycleDataExplorer: React.FC<CycleDataExplorerProps> = ({
         }
       };
 
-      // Generate realistic PR information based on issue state
+      // Generate PR information based on issue state
       const generatePRInfo = (state: string) => {
         if (state.toLowerCase().includes('review') || 
             state.toLowerCase().includes('merged') || 
@@ -162,13 +162,34 @@ const CycleDataExplorer: React.FC<CycleDataExplorerProps> = ({
         return undefined;
       };
 
-      // Get the current state name from the Linear issue
-      const currentState = issue.state.name;
-      const isCompleted = issue.state.type === 'completed';
-      
-      // Create a realistic workflow progression based on the current state
-      const createWorkflowProgression = () => {
-        const progression: Array<{state: string, timestamp: string, isIntermediate?: boolean}> = [];
+      // Use actual Linear status history if available, otherwise create synthetic data
+      if (issue.statusHistory && Array.isArray(issue.statusHistory) && issue.statusHistory.length > 0) {
+        // Use actual Linear status history
+        for (let i = 0; i < issue.statusHistory.length; i++) {
+          const entry = issue.statusHistory[i];
+          const previousEntry = i > 0 ? issue.statusHistory[i - 1] : null;
+          
+          if (entry && entry.timestamp && entry.toState) {
+            const dateTime = formatDateTime(entry.timestamp);
+            const duration = previousEntry && previousEntry.timestamp 
+              ? calculateDuration(previousEntry.timestamp, entry.timestamp) 
+              : undefined;
+            const prInfo = generatePRInfo(entry.toState);
+            
+            statusHistory.push({
+              from: entry.fromState || (previousEntry ? previousEntry.toState : ''),
+              to: entry.toState,
+              timestamp: entry.timestamp,
+              formattedDate: dateTime.formattedDate,
+              formattedTime: dateTime.formattedTime,
+              duration,
+              prInfo
+            });
+          }
+        }
+      } else {
+        // Fallback to synthetic status history for issues without actual history
+        const progression: Array<{state: string, timestamp: string}> = [];
         
         // Always start with Created
         if (issue.createdAt) {
@@ -180,95 +201,31 @@ const CycleDataExplorer: React.FC<CycleDataExplorerProps> = ({
           progression.push({ state: 'In Progress', timestamp: issue.startedAt });
         }
         
-        // Based on the current state, add realistic intermediate steps
-        if (currentState === 'Deployed') {
-          // For deployed issues: In Progress → Ready → Code Review → Testing → Deployed
-          if (issue.startedAt && issue.completedAt) {
-            const start = new Date(issue.startedAt);
-            const end = new Date(issue.completedAt);
-            const duration = end.getTime() - start.getTime();
-            
-            const readyTime = new Date(start.getTime() + duration * 0.2);
-            const reviewTime = new Date(start.getTime() + duration * 0.4);
-            const testTime = new Date(start.getTime() + duration * 0.7);
-            
-            progression.push({ state: 'Ready', timestamp: readyTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Code Review', timestamp: reviewTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Testing', timestamp: testTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Deployed', timestamp: issue.completedAt });
-          }
-        } else if (currentState === 'Merged') {
-          // For merged issues: In Progress → Ready → Code Review → Merged
-          if (issue.startedAt && issue.completedAt) {
-            const start = new Date(issue.startedAt);
-            const end = new Date(issue.completedAt);
-            const duration = end.getTime() - start.getTime();
-            
-            const readyTime = new Date(start.getTime() + duration * 0.3);
-            const reviewTime = new Date(start.getTime() + duration * 0.6);
-            
-            progression.push({ state: 'Ready', timestamp: readyTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Code Review', timestamp: reviewTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Merged', timestamp: issue.completedAt });
-          }
-        } else if (currentState === 'Testing') {
-          // For testing issues: In Progress → Ready → Code Review → Testing
-          if (issue.startedAt && issue.completedAt) {
-            const start = new Date(issue.startedAt);
-            const end = new Date(issue.completedAt);
-            const duration = end.getTime() - start.getTime();
-            
-            const readyTime = new Date(start.getTime() + duration * 0.3);
-            const reviewTime = new Date(start.getTime() + duration * 0.6);
-            
-            progression.push({ state: 'Ready', timestamp: readyTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Code Review', timestamp: reviewTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Testing', timestamp: issue.completedAt });
-          }
-        } else if (currentState === 'Code Review') {
-          // For code review issues: In Progress → Ready → Code Review
-          if (issue.startedAt && issue.updatedAt) {
-            const start = new Date(issue.startedAt);
-            const end = new Date(issue.updatedAt);
-            const duration = end.getTime() - start.getTime();
-            
-            const readyTime = new Date(start.getTime() + duration * 0.5);
-            
-            progression.push({ state: 'Ready', timestamp: readyTime.toISOString(), isIntermediate: true });
-            progression.push({ state: 'Code Review', timestamp: issue.updatedAt });
-          }
-        } else if (currentState === 'In Progress') {
-          // Already added above, no additional steps needed
-        } else {
-          // For any other state, just add it as the final state
-          const timestamp = issue.completedAt || issue.updatedAt;
-          if (timestamp) {
-            progression.push({ state: currentState, timestamp });
-          }
+        // Add current state
+        const currentState = issue.state.name;
+        const timestamp = issue.completedAt || issue.updatedAt;
+        if (timestamp && currentState !== 'In Progress') {
+          progression.push({ state: currentState, timestamp });
         }
         
-        return progression;
-      };
-
-      const workflowSteps = createWorkflowProgression();
-      
-      // Convert workflow progression to status history
-      for (let i = 0; i < workflowSteps.length; i++) {
-        const step = workflowSteps[i];
-        const previousStep = i > 0 ? workflowSteps[i - 1] : null;
-        const dateTime = formatDateTime(step.timestamp);
-        const duration = previousStep ? calculateDuration(previousStep.timestamp, step.timestamp) : undefined;
-        const prInfo = generatePRInfo(step.state);
-        
-        statusHistory.push({
-          from: previousStep ? previousStep.state : '',
-          to: step.state,
-          timestamp: step.timestamp,
-          formattedDate: dateTime.formattedDate,
-          formattedTime: dateTime.formattedTime,
-          duration,
-          prInfo
-        });
+        // Convert to status history
+        for (let i = 0; i < progression.length; i++) {
+          const step = progression[i];
+          const previousStep = i > 0 ? progression[i - 1] : null;
+          const dateTime = formatDateTime(step.timestamp);
+          const duration = previousStep ? calculateDuration(previousStep.timestamp, step.timestamp) : undefined;
+          const prInfo = generatePRInfo(step.state);
+          
+          statusHistory.push({
+            from: previousStep ? previousStep.state : '',
+            to: step.state,
+            timestamp: step.timestamp,
+            formattedDate: dateTime.formattedDate,
+            formattedTime: dateTime.formattedTime,
+            duration,
+            prInfo
+          });
+        }
       }
 
       // Calculate total duration
