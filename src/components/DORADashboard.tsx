@@ -1093,8 +1093,8 @@ const DORADashboard = () => {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
-              {/* DORA Metrics Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-stretch">
+              {/* DORA Metrics Cards - First Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
                 <MetricCard
                   title="Deployment Frequency"
                   value={doraMetrics.deploymentFrequency.value}
@@ -1115,6 +1115,18 @@ const DORADashboard = () => {
                   description="Time from code committed to code successfully running in production"
                   metricKey="leadTimeForChanges"
                 />
+                {codeReviewAnalysis && (
+                  <MetricCard
+                    title="Average Time in Code Review"
+                    value={codeReviewAnalysis.averageTimeInReview.value}
+                    unit={codeReviewAnalysis.averageTimeInReview.unit}
+                    formattedValue={codeReviewAnalysis.averageTimeInReview.formattedValue}
+                    trend={codeReviewAnalysis.averageTimeInReview.trend}
+                    rating={codeReviewAnalysis.averageTimeInReview.rating}
+                    description="Average time from code review start to merge"
+                    metricKey="codeReviewTime"
+                  />
+                )}
                 <MetricCard
                   title="Time to Deploy"
                   value={doraMetrics.timeToDeploy?.value || 0}
@@ -1126,6 +1138,10 @@ const DORADashboard = () => {
                   details={doraMetrics.timeToDeploy?.details}
                   metricKey="timeToDeploy"
                 />
+              </div>
+
+              {/* DORA Metrics Cards - Second Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                 <MetricCard
                   title="Change Failure Rate"
                   value={doraMetrics.changeFailureRate.value}
@@ -1147,49 +1163,6 @@ const DORADashboard = () => {
                   metricKey="timeToRecovery"
                 />
               </div>
-
-              {/* Code Review Metric */}
-              {codeReviewAnalysis && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
-                  <MetricCard
-                    title="Average Time in Code Review"
-                    value={codeReviewAnalysis.averageTimeInReview.value}
-                    unit={codeReviewAnalysis.averageTimeInReview.unit}
-                    formattedValue={codeReviewAnalysis.averageTimeInReview.formattedValue}
-                    trend={codeReviewAnalysis.averageTimeInReview.trend}
-                    rating={codeReviewAnalysis.averageTimeInReview.rating}
-                    description="Average time from code review start to merge"
-                    metricKey="codeReviewTime"
-                  />
-                  <div className="md:col-span-2">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-lg font-semibold">Code Review Summary</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="text-center p-4 bg-blue-50 rounded-lg">
-                            <div className="text-2xl font-bold text-blue-600">{codeReviewAnalysis.tasks.length}</div>
-                            <div className="text-sm text-gray-600">Total Reviews</div>
-                          </div>
-                          <div className="text-center p-4 bg-green-50 rounded-lg">
-                            <div className="text-2xl font-bold text-green-600">
-                              {codeReviewAnalysis.distribution.find(d => d.range === '< 4 hours')?.percentage || 0}%
-                            </div>
-                            <div className="text-sm text-gray-600">Same Day</div>
-                          </div>
-                          <div className="text-center p-4 bg-red-50 rounded-lg">
-                            <div className="text-2xl font-bold text-red-600">
-                              {codeReviewAnalysis.distribution.find(d => d.range === '> 1 week')?.percentage || 0}%
-                            </div>
-                            <div className="text-sm text-gray-600">Over 1 Week</div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                </div>
-              )}
 
               {/* Quick Stats */}
               <Card>
