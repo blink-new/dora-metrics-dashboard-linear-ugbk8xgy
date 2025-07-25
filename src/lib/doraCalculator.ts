@@ -360,13 +360,17 @@ class DORACalculator {
    */
   private getTimeToDeployHours(issue: LinearIssue): number {
     if (!issue.completedAt || !issue.state || issue.state.type !== 'completed') {
+      console.log(`⚠️ Issue ${issue.identifier}: Not completed or missing completedAt`);
       return 0;
     }
     
     let mergedTime: string | null = null;
+    let detectionMethod = 'none';
     
     // First, try to find the actual "Merged" transition in status history
     if (issue.statusHistory && Array.isArray(issue.statusHistory)) {
+      console.log(`🔍 Issue ${issue.identifier}: Checking ${issue.statusHistory.length} status history entries`);
+      
       const mergedTransition = issue.statusHistory.find(entry => {
         if (!entry || !entry.toState) return false;
         const state = entry.toState.toLowerCase().trim();
@@ -380,6 +384,14 @@ class DORACalculator {
       
       if (mergedTransition && mergedTransition.timestamp) {
         mergedTime = mergedTransition.timestamp;
+        detectionMethod = 'merged_transition';
+        console.log(`✅ Issue ${issue.identifier}: Found merged transition at ${mergedTime}`);
+      } else {
+        console.log(`⚠️ Issue ${issue.identifier}: No merged transition found in status history`);
+        // Log all status transitions for debugging
+        issue.statusHistory.forEach((entry, index) => {
+          console.log(`  ${index}: ${entry.fromState || 'START'} → ${entry.toState} at ${entry.timestamp}`);
+        });
       }
     }
     
@@ -396,6 +408,19 @@ class DORACalculator {
       
       if (reviewCompleteTransition && reviewCompleteTransition.timestamp) {
         mergedTime = reviewCompleteTransition.timestamp;
+        detectionMethod = 'review_complete';
+        console.log(`✅ Issue ${issue.identifier}: Using review complete transition at ${mergedTime}`);
+      }
+    }
+    
+    // Enhanced fallback: use the second-to-last status transition as "merge" time
+    if (!mergedTime && issue.statusHistory && Array.isArray(issue.statusHistory) && issue.statusHistory.length >= 2) {
+      // Use the second-to-last transition as the "merge" time
+      const secondToLastTransition = issue.statusHistory[issue.statusHistory.length - 2];
+      if (secondToLastTransition && secondToLastTransition.timestamp) {
+        mergedTime = secondToLastTransition.timestamp;
+        detectionMethod = 'second_to_last_transition';
+        console.log(`✅ Issue ${issue.identifier}: Using second-to-last transition (${secondToLastTransition.toState}) at ${mergedTime}`);
       }
     }
     
@@ -405,9 +430,12 @@ class DORACalculator {
       const completedDate = new Date(issue.completedAt);
       const estimatedMergeTime = new Date(completedDate.getTime() - (4 * 60 * 60 * 1000)); // 4 hours before
       mergedTime = estimatedMergeTime.toISOString();
+      detectionMethod = 'estimated';
+      console.log(`✅ Issue ${issue.identifier}: Using estimated merge time ${mergedTime} (4 hours before completion)`);
     }
     
     if (!mergedTime) {
+      console.log(`❌ Issue ${issue.identifier}: No merge time could be determined`);
       return 0;
     }
     
@@ -416,16 +444,21 @@ class DORACalculator {
     
     // Validate timestamps
     if (isNaN(merged.getTime()) || isNaN(deployed.getTime())) {
+      console.log(`❌ Issue ${issue.identifier}: Invalid timestamps - merged: ${mergedTime}, deployed: ${issue.completedAt}`);
       return 0;
     }
     
     // Ensure deployment is after merge
     if (deployed <= merged) {
-      return 0;
+      console.log(`⚠️ Issue ${issue.identifier}: Deployment time (${issue.completedAt}) is not after merge time (${mergedTime}). Using minimum 1 hour.`);
+      return 1; // Return minimum 1 hour instead of 0
     }
     
     // Use business hours calculation (excludes weekends)
-    return calculateBusinessHours(merged, deployed);
+    const deployTimeHours = calculateBusinessHours(merged, deployed);
+    console.log(`✅ Issue ${issue.identifier}: Deploy time calculated as ${deployTimeHours.toFixed(2)} hours using ${detectionMethod} method`);
+    
+    return deployTimeHours;
   }
 
   /**
