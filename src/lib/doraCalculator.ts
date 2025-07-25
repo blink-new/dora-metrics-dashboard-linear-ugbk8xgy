@@ -357,6 +357,7 @@ class DORACalculator {
   /**
    * Calculate time to deploy for issues that have been merged and deployed
    * Time to deploy = from when code is merged to when it's deployed
+   * ONLY calculates for issues that have BOTH "Merged" and "Deployed" status transitions
    */
   private getTimeToDeployHours(issue: LinearIssue): number {
     if (!issue.completedAt || !issue.state || issue.state.type !== 'completed') {
@@ -366,37 +367,22 @@ class DORACalculator {
     let mergedTime: string | null = null;
     let deployedTime: string | null = null;
     
-    // Look for merge and deploy transitions in status history
+    // Look for EXACT "Merged" and "Deployed" transitions in status history
     if (issue.statusHistory && Array.isArray(issue.statusHistory)) {
-      // For your Linear workflow, we need to understand the actual flow:
-      // Based on the data, your workflow appears to be: In Progress → Ready → done
-      // Where "Ready" represents code that's ready for deployment (merged)
-      // And "done" represents deployed state
-      
-      // Find the transition TO "Ready" state (this represents merged/ready for deploy)
-      const readyTransition = issue.statusHistory.find(entry => {
+      // Find the transition TO "Merged" state (exact match)
+      const mergedTransition = issue.statusHistory.find(entry => {
         if (!entry || !entry.toState) return false;
-        const state = entry.toState.toLowerCase().trim();
-        return state === 'ready' || 
-               state === 'merged' || 
-               state === 'code review' ||
-               state === 'testing' ||
-               state === 'staging';
+        return entry.toState === 'Merged';
       });
       
-      // Find the transition TO final completion state (this represents deployed)
+      // Find the transition TO "Deployed" state (exact match)
       const deployedTransition = issue.statusHistory.find(entry => {
         if (!entry || !entry.toState) return false;
-        const state = entry.toState.toLowerCase().trim();
-        return state === 'done' || 
-               state === 'deployed' || 
-               state === 'completed' ||
-               state === 'closed' ||
-               state === 'finished';
+        return entry.toState === 'Deployed';
       });
       
-      if (readyTransition && readyTransition.timestamp) {
-        mergedTime = readyTransition.timestamp;
+      if (mergedTransition && mergedTransition.timestamp) {
+        mergedTime = mergedTransition.timestamp;
       }
       
       if (deployedTransition && deployedTransition.timestamp) {
@@ -404,7 +390,8 @@ class DORACalculator {
       }
     }
     
-    // If we don't have both times, return 0
+    // ONLY calculate Time to Deploy for issues that have BOTH Merged and Deployed states
+    // If either is missing, return 0 (this issue doesn't have the required workflow)
     if (!mergedTime || !deployedTime) {
       return 0;
     }
