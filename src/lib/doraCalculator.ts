@@ -360,82 +360,54 @@ class DORACalculator {
    */
   private getTimeToDeployHours(issue: LinearIssue): number {
     if (!issue.completedAt || !issue.state || issue.state.type !== 'completed') {
-      console.log(`⚠️ Issue ${issue.identifier}: Not completed or missing completedAt`);
       return 0;
     }
     
     let mergedTime: string | null = null;
-    let detectionMethod = 'none';
     
-    // First, try to find the actual "Merged" transition in status history
+    // Since every issue is automatically deployed and has a merged status transition,
+    // we need to find the actual merged transition in the status history
     if (issue.statusHistory && Array.isArray(issue.statusHistory)) {
-      console.log(`🔍 Issue ${issue.identifier}: Checking ${issue.statusHistory.length} status history entries`);
-      
+      // Look for any transition that indicates the code was merged/ready for deployment
+      // This includes various possible state names used in Linear workflows
       const mergedTransition = issue.statusHistory.find(entry => {
         if (!entry || !entry.toState) return false;
         const state = entry.toState.toLowerCase().trim();
-        return state === 'merged' || 
-               state === 'merge' || 
-               state === 'ready for deploy' ||
-               state === 'ready to deploy' ||
-               state === 'pending deployment' ||
-               state === 'awaiting deployment';
+        return state.includes('merged') || 
+               state.includes('merge') || 
+               state.includes('deploy') ||
+               state.includes('ready') ||
+               state.includes('done') ||
+               state.includes('complete') ||
+               state.includes('finished') ||
+               state.includes('approved') ||
+               state.includes('review') ||
+               state === 'qa' ||
+               state === 'testing' ||
+               state === 'staging';
       });
       
       if (mergedTransition && mergedTransition.timestamp) {
         mergedTime = mergedTransition.timestamp;
-        detectionMethod = 'merged_transition';
-        console.log(`✅ Issue ${issue.identifier}: Found merged transition at ${mergedTime}`);
-      } else {
-        console.log(`⚠️ Issue ${issue.identifier}: No merged transition found in status history`);
-        // Log all status transitions for debugging
-        issue.statusHistory.forEach((entry, index) => {
-          console.log(`  ${index}: ${entry.fromState || 'START'} → ${entry.toState} at ${entry.timestamp}`);
-        });
       }
     }
     
-    // Fallback: if no merged transition found, look for code review completion
-    if (!mergedTime && issue.statusHistory && Array.isArray(issue.statusHistory)) {
-      const reviewCompleteTransition = issue.statusHistory.find(entry => {
-        if (!entry || !entry.toState) return false;
-        const state = entry.toState.toLowerCase().trim();
-        return state === 'review complete' || 
-               state === 'approved' ||
-               state === 'ready' ||
-               state === 'done with review';
-      });
-      
-      if (reviewCompleteTransition && reviewCompleteTransition.timestamp) {
-        mergedTime = reviewCompleteTransition.timestamp;
-        detectionMethod = 'review_complete';
-        console.log(`✅ Issue ${issue.identifier}: Using review complete transition at ${mergedTime}`);
-      }
-    }
-    
-    // Enhanced fallback: use the second-to-last status transition as "merge" time
+    // If we still haven't found a merged transition, use the second-to-last transition
+    // This assumes the last transition is to "deployed/done" and the previous one was "merged"
     if (!mergedTime && issue.statusHistory && Array.isArray(issue.statusHistory) && issue.statusHistory.length >= 2) {
-      // Use the second-to-last transition as the "merge" time
       const secondToLastTransition = issue.statusHistory[issue.statusHistory.length - 2];
       if (secondToLastTransition && secondToLastTransition.timestamp) {
         mergedTime = secondToLastTransition.timestamp;
-        detectionMethod = 'second_to_last_transition';
-        console.log(`✅ Issue ${issue.identifier}: Using second-to-last transition (${secondToLastTransition.toState}) at ${mergedTime}`);
       }
     }
     
-    // Last resort: use a reasonable estimate based on completion time
-    if (!mergedTime && issue.completedAt) {
-      // Assume deployment happened within 4 hours of completion for estimation
-      const completedDate = new Date(issue.completedAt);
-      const estimatedMergeTime = new Date(completedDate.getTime() - (4 * 60 * 60 * 1000)); // 4 hours before
-      mergedTime = estimatedMergeTime.toISOString();
-      detectionMethod = 'estimated';
-      console.log(`✅ Issue ${issue.identifier}: Using estimated merge time ${mergedTime} (4 hours before completion)`);
+    // If we still don't have a merge time, use the started time as a fallback
+    // This assumes the issue was "merged" when development started
+    if (!mergedTime && issue.startedAt) {
+      mergedTime = issue.startedAt;
     }
     
     if (!mergedTime) {
-      console.log(`❌ Issue ${issue.identifier}: No merge time could be determined`);
       return 0;
     }
     
@@ -444,21 +416,16 @@ class DORACalculator {
     
     // Validate timestamps
     if (isNaN(merged.getTime()) || isNaN(deployed.getTime())) {
-      console.log(`❌ Issue ${issue.identifier}: Invalid timestamps - merged: ${mergedTime}, deployed: ${issue.completedAt}`);
       return 0;
     }
     
     // Ensure deployment is after merge
     if (deployed <= merged) {
-      console.log(`⚠️ Issue ${issue.identifier}: Deployment time (${issue.completedAt}) is not after merge time (${mergedTime}). Using minimum 1 hour.`);
       return 1; // Return minimum 1 hour instead of 0
     }
     
     // Use business hours calculation (excludes weekends)
-    const deployTimeHours = calculateBusinessHours(merged, deployed);
-    console.log(`✅ Issue ${issue.identifier}: Deploy time calculated as ${deployTimeHours.toFixed(2)} hours using ${detectionMethod} method`);
-    
-    return deployTimeHours;
+    return calculateBusinessHours(merged, deployed);
   }
 
   /**
