@@ -16,12 +16,6 @@ const MetricRelationshipAnalysis = ({ doraMetrics, codeReviewAnalysis }: MetricR
   const codeReviewHours = codeReviewAnalysis.averageTimeInReview.value; // already in hours
   const deployTimeHours = (doraMetrics.timeToDeploy?.value || 0) * 8; // business days to hours (8 hours per day)
 
-  // Debug logging to understand the values
-  console.log('🔍 Metric Relationship Analysis Debug:');
-  console.log('- Lead Time for Changes:', doraMetrics.leadTimeForChanges.value, 'business days =', leadTimeHours, 'hours');
-  console.log('- Average Time in Code Review:', codeReviewAnalysis.averageTimeInReview.value, 'hours');
-  console.log('- Time to Deploy:', doraMetrics.timeToDeploy?.value || 0, 'business days =', deployTimeHours, 'hours');
-
   // Calculate the sum of code review + deploy time
   const sumHours = codeReviewHours + deployTimeHours;
   
